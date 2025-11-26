@@ -9,19 +9,19 @@ from pathlib import Path
 import signal
 from resx_ico_replace import ResxIconUpdater
 import xml.etree.ElementTree as ET
-
+from datetime import datetime
 
 # Create the logger
 logger = logging.getLogger("MsBuildScript Log")
 logger.setLevel(logging.DEBUG)
 
 # Handler for DEBUG logs
-errorLoggingHandler = logging.FileHandler("error.log", encoding="utf-8")
+errorLoggingHandler = logging.FileHandler(f"error_{datetime.now().strftime("%d_%m_%y_%H_%M_%S")}.log", encoding="utf-8")
 errorLoggingHandler.setLevel(logging.ERROR)
 errorLoggingHandler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 
 # Handler for INFO logs
-infoLoggingHandler = logging.FileHandler("debug.log", encoding="utf-8")
+infoLoggingHandler = logging.FileHandler(f"debug_{datetime.now().strftime("%d_%m_%y_%H_%M_%S")}.log", encoding="utf-8")
 infoLoggingHandler.setLevel(logging.DEBUG)
 infoLoggingHandler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 
@@ -251,71 +251,74 @@ def process_single_project(project_dir):
     """Process a single project directory - runs the application and captures screenshot"""
     print(f"--- Processing project in {project_dir} ---")
     logger.debug(f"Processing project in {project_dir}")
+
+    successCount = 0
+    failedCount = 0
+
     # Verify path exists
     if not os.path.exists(project_dir):
         logger.error(f"Directory not found: {project_dir}") 
         print(f"Error: Directory not found: {project_dir}")
-        return False
+        failedCount += 1
+        return successCount, failedCount
 
     # Verify it's a .NET project (look for .csproj files)
     csproj_files = [f for f in os.listdir(project_dir) if f.endswith('.csproj')]
     if not csproj_files:
         print(f"Warning: No .csproj files found in {project_dir}, skipping...")
         logger.error(f"No .csproj files found in {project_dir}, skipping...") 
-        return False
+        failedCount += 1
+        return successCount, failedCount
 
     # --- STEP 0: Snapshot existing windows before launching ---
     print("--- Scanning existing windows... ---")
     existing_titles = set(gw.getAllTitles())
     logger.debug(f"Existing window titles: {existing_titles}")
     process = None
-    try:
-        # Step 1: Try to run the .NET Framework project
-        print(f"Attempting to build and run .NET Framework projects...")
-        logger.debug(f"Attempting to build and run .NET Framework projects...")
-        csproj_files = [f for f in os.listdir(project_dir) if f.endswith('.csproj')]
-        
-        if not csproj_files:
-            logger.error(f"No .csproj files found in {project_dir}, skipping...")
-            return None
-        
-        for csproj in csproj_files:
-            app_process = None
-            try:
-                ResxIconUpdater('C1.ico').search_and_update(project_dir)
-                app_process = build_and_run_netframework_project(project_dir, csproj)
+    
+    # Step 1: Try to run the .NET Framework project
+    print(f"Attempting to build and run .NET Framework projects...")
+    logger.debug(f"Attempting to build and run .NET Framework projects...")
+    csproj_files = [f for f in os.listdir(project_dir) if f.endswith('.csproj')]
+    
+    if len(csproj_files) == 0:
+        logger.error(f"No .csproj files found in {project_dir}, skipping...")
+        failedCount += 1
+        return successCount, failedCount
+    
+    for csproj in csproj_files:
+        app_process = None
+        try:
+            ResxIconUpdater('C1.ico').search_and_update(project_dir)
+            app_process = build_and_run_netframework_project(project_dir, csproj)
 
-                print("--- Detecting new application window... ---" )
-                logger.debug(f"[{csproj}]-Detecting new application window... ---" )
-                target_window = detect_new_window(existing_titles)
-                
-                if target_window is None:
-                    logger.error(f"Could not detect application window for project {csproj}, skipping screenshot...")
-                    print(f"Could not detect application window for project {csproj}, skipping screenshot...")
-                    continue
-
-                bring_window_to_front_take_screenshot(target_window, project_dir)
-                print("--- Closing application... ---")
-                close_application(target_window)
-            except Exception as e:
-                logger.error(f"[{csproj}][{project_dir}]-Build/Run failed for {csproj}: {e}")   
-                print(f"Build/Run failed for {csproj}: {e}")
+            print("--- Detecting new application window... ---" )
+            logger.debug(f"[{csproj}]-Detecting new application window... ---" )
+            target_window = detect_new_window(existing_titles)
+            
+            if target_window is None:
+                logger.error(f"Could not detect application window for project {csproj}, skipping screenshot...")
+                print(f"Could not detect application window for project {csproj}, skipping screenshot...")
+                failedCount += 1
                 continue
-            finally:
-                print("--- Cleaning up stray processes... ---")
-                logger.debug(f"[{project_dir}]-Cleaning up stray processes...")
-                if(app_process is not None):
-                    logger.debug(f"[{project_dir}]-Killing process tree for PID: {app_process.pid}")    
-                    print("--- Killing process tree...---")
-                    kill_process_tree(app_process.pid)
-        return True      
-    except Exception as e:
-        logger.error(f"[{project_dir}]-An unexpected error occurred: {e}")
-        print(f"An unexpected error occurred: {e}")
-        if process:
-            logger.debug(f"[{project_dir}]-Killing process tree for PID: {process.pid}")
-            kill_process_tree(process.pid)
-        return False
+
+            bring_window_to_front_take_screenshot(target_window, project_dir)
+            print("--- Closing application... ---")
+            close_application(target_window)
+            successCount += 1
+        except Exception as e:
+            logger.error(f"[{csproj}][{project_dir}]-Build/Run failed for {csproj}: {e}")   
+            print(f"Build/Run failed for {csproj}: {e}")
+            failedCount += 1
+            continue
+        finally:
+            print("--- Cleaning up stray processes... ---")
+            logger.debug(f"[{project_dir}]-Cleaning up stray processes...")
+            if(app_process is not None):
+                logger.debug(f"[{project_dir}]-Killing process tree for PID: {app_process.pid}")    
+                print("--- Killing process tree...---")
+                kill_process_tree(app_process.pid)
+    return successCount, failedCount  
 
 def cleanup_stray_processes(project_dir):
     """Clean up any stray processes that might still be running"""
@@ -395,10 +398,9 @@ def run_for_all_projects():
         print(f"{'='*60}")
         
         try:
-            if process_single_project(project_dir):
-                successful += 1
-            else:
-                failed += 1
+            successCount, failedCount = process_single_project(project_dir)
+            successful += successCount
+            failed += failedCount
         except Exception as e:
             failed += 1
             continue
