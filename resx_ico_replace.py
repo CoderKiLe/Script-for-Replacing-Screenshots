@@ -20,37 +20,32 @@ class ResxIconUpdater:
 
     def update_resx_file(self, file_path):
         if not self.encoded_icon:
-            print("Error: No encoded icon available. Cannot update.")
-            return
+            raise Exception("Error: No encoded icon available. Cannot update.")
 
         print(f"Checking {file_path}...")
-        try:
-            # Parse the XML file safely using a context manager to ensure it's closed
-            with open(file_path, 'r', encoding='utf-8') as f:
-                tree = ET.parse(f)
-            root = tree.getroot()
+        # Parse the XML file safely using a context manager to ensure it's closed
+        with open(file_path, 'r', encoding='utf-8') as f:
+            tree = ET.parse(f)
+        root = tree.getroot()
 
-            found = False
-            # Replace Icon
-            for item in root.iter('data'):
-                if item.attrib.get('name') == '$this.Icon':
-                    found = True
-                    # Chunk the base64 string into lines of 80 characters for better readability
-                    chunk_size = 80
-                    chunked_str = '\n        '.join(self.encoded_icon[i:i+chunk_size] for i in range(0, len(self.encoded_icon), chunk_size))
-                    item.find('value').text = '\n        ' + chunked_str + '\n    '
+        found = False
+        # Replace Icon
+        for item in root.iter('data'):
+            if item.attrib.get('name') == '$this.Icon':
+                found = True
+                # Chunk the base64 string into lines of 80 characters for better readability
+                chunk_size = 80
+                chunked_str = '\n        '.join(self.encoded_icon[i:i+chunk_size] for i in range(0, len(self.encoded_icon), chunk_size))
+                item.find('value').text = '\n        ' + chunked_str + '\n    '
 
-            if found:
-                print(f"  $this.Icon found in {file_path}, updating...")
-                # Overwrite the file
-                with open(file_path, 'wb') as f:
-                    f.write(ET.tostring(root, encoding='utf-8', xml_declaration=True))
-                print(f"  Successfully updated {file_path}")
-            else:
-                print(f"  $this.Icon not found in {file_path}")
+        if found:
+            print(f"  $this.Icon found in {file_path}, updating...")
+            # Overwrite the file
+            with open(file_path, 'wb') as f:
+                f.write(ET.tostring(root, encoding='utf-8', xml_declaration=True))
+        else:
+            raise Exception(f"  $this.Icon not found in {file_path}")
 
-        except Exception as e:
-            print(f"  Failed to process {file_path}: {e}")
 
     def search_and_update(self, project_dir):
         target_filenames = {'mainform.resx', 'form1.resx'}
@@ -66,6 +61,6 @@ class ResxIconUpdater:
                     self.update_resx_file(full_path)
 
         if not found_any:
-             print("MainForm.resx or Form1.resx not found in the project directory")
+             raise Exception("MainForm.resx or Form1.resx not found in the project directory")
 
  

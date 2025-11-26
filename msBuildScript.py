@@ -4,9 +4,31 @@ import subprocess
 import pyautogui
 import pygetwindow as gw
 import psutil
+import logging
+from pathlib import Path
 import signal
 from resx_ico_replace import ResxIconUpdater
 import xml.etree.ElementTree as ET
+
+
+# Create the logger
+logger = logging.getLogger("MsBuildScript Log")
+logger.setLevel(logging.DEBUG)
+
+# Handler for DEBUG logs
+errorLoggingHandler = logging.FileHandler("error.log", encoding="utf-8")
+errorLoggingHandler.setLevel(logging.ERROR)
+errorLoggingHandler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+
+# Handler for INFO logs
+infoLoggingHandler = logging.FileHandler("debug.log", encoding="utf-8")
+infoLoggingHandler.setLevel(logging.DEBUG)
+infoLoggingHandler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+
+# Attach handlers to the logger
+logger.addHandler(errorLoggingHandler)
+logger.addHandler(infoLoggingHandler)
+
 
 def kill_process_tree(pid):
     """Kill a process and all its child processes"""
@@ -19,6 +41,7 @@ def kill_process_tree(pid):
             try:
                 child.terminate()
             except psutil.NoSuchProcess:
+                logger.debug(f"Child process {child.pid} already terminated.")
                 pass
         
         # Wait a moment for children to terminate
@@ -28,7 +51,8 @@ def kill_process_tree(pid):
         for child in still_alive:
             try:
                 child.kill()
-            except psutil.NoSuchProcess:
+            except psutil.NoSuchProcess as e:
+                logger.debug(f"Child process {child.pid} already terminated: {e}")
                 pass
         
         # Kill parent
@@ -38,10 +62,12 @@ def kill_process_tree(pid):
         except (psutil.NoSuchProcess, psutil.TimeoutExpired):
             try:
                 parent.kill()
-            except psutil.NoSuchProcess:
+            except psutil.NoSuchProcess as e:
+                logger.debug(f"Process {pid} already terminated: {e}")
                 pass
                 
-    except psutil.NoSuchProcess:
+    except psutil.NoSuchProcess as e:
+        logger.debug(f"Process {pid} already terminated: {e}")
         pass
 
 def run_subprocess(command, cwd, wait = True, debug_name = "Subprocess"):
@@ -58,23 +84,26 @@ def run_subprocess(command, cwd, wait = True, debug_name = "Subprocess"):
         if(not wait):
             print(f"{debug_name}[{command}] started with PID: {process.pid}")
             return process
+        
         stdout, stderr = process.communicate()
-        # import pdb; pdb.set_trace() # Debugging breakpoint
-        # print(stdout.decode())
+        logger.debug(f"[{cwd}]-{debug_name}[{command}] stdout: {stdout.decode()}")
 
         if wait:
             process.wait()
 
         if process.returncode != 0:
-            print(f"{debug_name} failed with return code: {process.returncode}")
+            logger.error(f"{debug_name}[{command}] failed with return code: {process.returncode}")
+            print(f"[{cwd}]-{debug_name} failed with return code: {process.returncode}")
+            
             if stderr:
+                logger.error(f"[{cwd}]-{debug_name}[{command}] errors: {stderr.decode()}")
                 print(f"{debug_name}[{command}] errors: {stderr.decode()}")
                 raise Exception(stderr.decode())
-
             raise Exception(f"{debug_name}[{command}] failed with return code: {process.returncode}")
-            
         print(f"{debug_name} successful!")
+        logger.debug(f"{debug_name} successful!")
     except Exception as e:
+        logger.error(f"[{cwd}]-{debug_name}[{command}] error: {e}")
         print(f"{debug_name}[{command}] error: {e}")
         raise
 
@@ -126,15 +155,6 @@ def find_output_executable(project_dir, csproj_filename):
     
     return None
 
-def try_dotnet_run(project_dir):
-    """Try running with dotnet run as fallback"""
-    try:
-        process = subprocess.Popen(["dotnet", "run"], cwd=project_dir, shell=True)
-        return process
-    except Exception as e:
-        print(f"dotnet run failed: {e}")
-        return None
-
 def detect_new_window(existing_titles, retry_count = 0, max_retries = 20):
     if retry_count >= max_retries:
         print("Error: Maximum retries reached while detecting new window.")
@@ -148,8 +168,6 @@ def detect_new_window(existing_titles, retry_count = 0, max_retries = 20):
     target_window = None
 
     if not new_titles:
-        print("Error: No new windows detected after launch.")
-        print("The application might have failed to start, or it didn't create a visible window.")
         time.sleep(0.2)
         return detect_new_window(existing_titles, retry_count, max_retries)
     
@@ -182,6 +200,7 @@ def detect_new_window(existing_titles, retry_count = 0, max_retries = 20):
 
 def bring_window_to_front_take_screenshot(target_window, csproj):
     if target_window is None:
+        logger.debug("No target window to bring to front.")
         return
     
     if not target_window.isActive:
@@ -189,13 +208,11 @@ def bring_window_to_front_take_screenshot(target_window, csproj):
             target_window.activate()
             time.sleep(1)  # Give more time for window activation
         except Exception as e:
+            logger.error(f"Warning: Could not force focus to window. Attempting capture anyway. ({e})") 
             print(f"Warning: Could not force focus to window. Attempting capture anyway. ({e})")
 
-    print("--- Bringing maximizing ---")
     target_window.maximize()
-    print("--- waiting for window to be maximized ---")
     time.sleep(2)
-    print("--- Window maximized ---")
     
     # Step 4: Take screenshot
     print("--- Capturing Screenshot ---")
@@ -206,15 +223,14 @@ def bring_window_to_front_take_screenshot(target_window, csproj):
             target_window.width, 
             target_window.height
         ))
-
         # Step 5: Save with project name for uniqueness
         project_name = os.path.basename(csproj)
         save_path = os.path.join(csproj, f"{project_name}_screenshot.png")
         screenshot.save(save_path)
-
-        print(f"Success! Screenshot saved to: {save_path}")
+        logger.debug(f"Screenshot saved to: {save_path}")
 
     except Exception as e:
+        logger.error(f"Failed to capture screenshot: {e}")    
         print(f"Failed to capture screenshot: {e}")
         return
 
@@ -224,26 +240,20 @@ def close_application(target_window):
         try:
             # Try to close the window gracefully first
             target_window.close()
+            logger.debug("Sent close signal to application window.")    
             time.sleep(2)
         except Exception as e:
+            logger.error(f"Warning: Could not close window gracefully: {e}")    
             print(f"Warning: Could not close window gracefully: {e}")
-
-    # Kill the process tree
-    # if process:
-    #     kill_process_tree(process.pid)
-    
-    # # Additional cleanup
-    # time.sleep(1)
-    # cleanup_stray_processes(project_dir)
-    
     return 
 
 def process_single_project(project_dir):
     """Process a single project directory - runs the application and captures screenshot"""
     print(f"--- Processing project in {project_dir} ---")
-
+    logger.debug(f"Processing project in {project_dir}")
     # Verify path exists
     if not os.path.exists(project_dir):
+        logger.error(f"Directory not found: {project_dir}") 
         print(f"Error: Directory not found: {project_dir}")
         return False
 
@@ -251,50 +261,59 @@ def process_single_project(project_dir):
     csproj_files = [f for f in os.listdir(project_dir) if f.endswith('.csproj')]
     if not csproj_files:
         print(f"Warning: No .csproj files found in {project_dir}, skipping...")
+        logger.error(f"No .csproj files found in {project_dir}, skipping...") 
         return False
 
     # --- STEP 0: Snapshot existing windows before launching ---
     print("--- Scanning existing windows... ---")
     existing_titles = set(gw.getAllTitles())
+    logger.debug(f"Existing window titles: {existing_titles}")
     process = None
-
     try:
         # Step 1: Try to run the .NET Framework project
         print(f"Attempting to build and run .NET Framework projects...")
+        logger.debug(f"Attempting to build and run .NET Framework projects...")
         csproj_files = [f for f in os.listdir(project_dir) if f.endswith('.csproj')]
+        
         if not csproj_files:
+            logger.error(f"No .csproj files found in {project_dir}, skipping...")
             return None
+        
         for csproj in csproj_files:
             app_process = None
             try:
                 ResxIconUpdater('C1.ico').search_and_update(project_dir)
                 app_process = build_and_run_netframework_project(project_dir, csproj)
 
-                # WAIT_TIME = 6  # Give more time for window to maximize
-                # print(f"--- Waiting {WAIT_TIME} seconds for application to load ---")
-                # time.sleep(WAIT_TIME)
                 print("--- Detecting new application window... ---" )
+                logger.debug(f"[{csproj}]-Detecting new application window... ---" )
                 target_window = detect_new_window(existing_titles)
+                
                 if target_window is None:
+                    logger.error(f"Could not detect application window for project {csproj}, skipping screenshot...")
                     print(f"Could not detect application window for project {csproj}, skipping screenshot...")
                     continue
 
-                print("--- Bringing window to front and taking screenshot... ---")
                 bring_window_to_front_take_screenshot(target_window, project_dir)
                 print("--- Closing application... ---")
                 close_application(target_window)
             except Exception as e:
+                logger.error(f"[{csproj}][{project_dir}]-Build/Run failed for {csproj}: {e}")   
                 print(f"Build/Run failed for {csproj}: {e}")
                 continue
             finally:
                 print("--- Cleaning up stray processes... ---")
+                logger.debug(f"[{project_dir}]-Cleaning up stray processes...")
                 if(app_process is not None):
+                    logger.debug(f"[{project_dir}]-Killing process tree for PID: {app_process.pid}")    
                     print("--- Killing process tree...---")
                     kill_process_tree(app_process.pid)
         return True      
     except Exception as e:
+        logger.error(f"[{project_dir}]-An unexpected error occurred: {e}")
         print(f"An unexpected error occurred: {e}")
         if process:
+            logger.debug(f"[{project_dir}]-Killing process tree for PID: {process.pid}")
             kill_process_tree(process.pid)
         return False
 
@@ -307,11 +326,14 @@ def cleanup_stray_processes(project_dir):
                 # Look for processes that might be related to our project
                 cmdline = proc.info['cmdline'] or []
                 if any(project_name in str(arg) for arg in cmdline):
+                    logger.debug(f"Found stray process related to project: {proc.info['pid']} - terminating")
                     print(f"Found stray process related to project: {proc.info['pid']} - terminating")
                     proc.terminate()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
+            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                logger.error(f"Error accessing process info: {e}")
+
     except Exception as e:
+        logger.error(f"Error during stray process cleanup: {e}")    
         print(f"Error during stray process cleanup: {e}")
 
 def find_cs_projects(main_directory):
@@ -343,6 +365,7 @@ def run_for_all_projects():
     
     # Verify main directory exists
     if not os.path.exists(MAIN_DIR):
+        logger.error(f"Main directory not found: {MAIN_DIR}")
         print(f"Error: Main directory not found: {MAIN_DIR}")
         return
     
@@ -350,14 +373,18 @@ def run_for_all_projects():
     projects = find_cs_projects(MAIN_DIR)
     
     if not projects:
+        logger.error("No C# projects found in the directory structure.")
         print("No C# projects found in the directory structure.")
         return
-    
+
     print(f"\nFound {len(projects)} C# project(s) to process:")
+    logger.debug(f"Found {len(projects)} C# project(s) to process:")
+    
     for i, project in enumerate(projects, 1):
         print(f"  {i}. {project}")
     
     print(f"\nStarting batch processing...")
+    logger.debug("Starting batch processing...")
     
     successful = 0
     failed = 0
@@ -367,10 +394,14 @@ def run_for_all_projects():
         print(f"Processing project {i}/{len(projects)}: {os.path.basename(project_dir)}")
         print(f"{'='*60}")
         
-        if process_single_project(project_dir):
-            successful += 1
-        else:
+        try:
+            if process_single_project(project_dir):
+                successful += 1
+            else:
+                failed += 1
+        except Exception as e:
             failed += 1
+            continue
         
         # Longer delay between projects to ensure clean shutdown
         time.sleep(5)
@@ -381,8 +412,11 @@ def run_for_all_projects():
     print(f"Failed: {failed}")
     print(f"Total: {len(projects)}")
     print(f"{'='*60}")
+    logger.debug(f"Batch processing completed! Successful: {successful}, Failed: {failed}, Total: {len(projects)}")
+
 
 def exit_gracefully(signum, frame):
+    logger.debug("Received termination signal. Exiting gracefully...")
     print("\nReceived termination signal. Exiting gracefully...")
     exit(0)
 
@@ -390,13 +424,16 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, exit_gracefully)
     # Ask user if they want to process single project or batch
     choice = input("Choose mode:\n1 - Single project (original behavior)\n2 - Batch process all projects in directory\nEnter choice (1 or 2): ").strip()
-    
+    logger.debug(f"Script started in mode: {choice}")
+
     if choice == "2":
         run_for_all_projects()
     else:
         # Original single project functionality
         PROJECT_DIR = input("Enter the full path to your project directory: ").strip().strip('"').strip("'")
+
+        PROJECT_DIR = Path(r"K:\Source Clone Items\Winforms Code base (Samples)-Source Clone\NetFramework\Barcode\CS\BarcodeDemo")
+        # PROJECT_DIR = "K:\Source Clone Items\Winforms Code base (Samples)-Source Clone\NetFramework\Barcode\CS\BarcodeDemo".strip().strip('"').strip("'")
+        logger.debug(f"Processing single project: {PROJECT_DIR}")
+        logger.error("This is just for testing purposes")
         process_single_project(PROJECT_DIR)
-
-
-
