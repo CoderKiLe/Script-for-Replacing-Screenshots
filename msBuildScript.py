@@ -5,6 +5,8 @@ import pyautogui
 import pygetwindow as gw
 import psutil
 import signal
+from resx_ico_replace import ResxIconUpdater
+import xml.etree.ElementTree as ET
 
 def kill_process_tree(pid):
     """Kill a process and all its child processes"""
@@ -68,6 +70,7 @@ def run_subprocess(command, cwd, wait = True, debug_name = "Subprocess"):
             if stderr:
                 print(f"{debug_name}[{command}] errors: {stderr.decode()}")
                 raise Exception(stderr.decode())
+
             raise Exception(f"{debug_name}[{command}] failed with return code: {process.returncode}")
             
         print(f"{debug_name} successful!")
@@ -75,9 +78,10 @@ def run_subprocess(command, cwd, wait = True, debug_name = "Subprocess"):
         print(f"{debug_name}[{command}] error: {e}")
         raise
 
+
+
 def build_and_run_netframework_project(project_dir, csproj):
-    """Build and run .NET Framework project"""
-    
+    """Build and run .NET Framework project"""    
     print(f"Building project: {csproj}")
 
     # Step 1: Clean the project
@@ -263,6 +267,7 @@ def process_single_project(project_dir):
         for csproj in csproj_files:
             app_process = None
             try:
+                ResxIconUpdater('C1.ico').search_and_update(project_dir)
                 app_process = build_and_run_netframework_project(project_dir, csproj)
 
                 # WAIT_TIME = 6  # Give more time for window to maximize
