@@ -131,7 +131,12 @@ def try_dotnet_run(project_dir):
         print(f"dotnet run failed: {e}")
         return None
 
-def detect_new_window(existing_titles):
+def detect_new_window(existing_titles, retry_count = 0, max_retries = 20):
+    if retry_count >= max_retries:
+        print("Error: Maximum retries reached while detecting new window.")
+        raise Exception("Maximum retries reached while detecting new window.")
+    
+    retry_count += 1
     current_titles = set(gw.getAllTitles())
     # Find titles that are in 'current' but were not in 'existing'
     new_titles = [t for t in (current_titles - existing_titles) if t.strip()]
@@ -141,7 +146,8 @@ def detect_new_window(existing_titles):
     if not new_titles:
         print("Error: No new windows detected after launch.")
         print("The application might have failed to start, or it didn't create a visible window.")
-        return None
+        time.sleep(0.2)
+        return detect_new_window(existing_titles, retry_count, max_retries)
     
     # Filter out irrelevant windows
     filtered_titles = [
@@ -164,7 +170,11 @@ def detect_new_window(existing_titles):
     else:
         print("No suitable windows found after filtering")
 
-    return target_window
+    if target_window is not None:
+        return target_window
+    
+    time.sleep(0.2)
+    return detect_new_window(existing_titles, retry_count, max_retries)
 
 def bring_window_to_front_take_screenshot(target_window, csproj):
     if target_window is None:
@@ -179,9 +189,8 @@ def bring_window_to_front_take_screenshot(target_window, csproj):
 
     print("--- Bringing maximizing ---")
     target_window.maximize()
-    WAIT_TIME = 2  # Give more time for window to maximize
-    print(f"--- Waiting {WAIT_TIME} seconds for application to maximize ---")
-    time.sleep(WAIT_TIME)
+    print("--- waiting for window to be maximized ---")
+    time.sleep(2)
     print("--- Window maximized ---")
     
     # Step 4: Take screenshot
@@ -256,9 +265,9 @@ def process_single_project(project_dir):
             try:
                 app_process = build_and_run_netframework_project(project_dir, csproj)
 
-                WAIT_TIME = 6  # Give more time for window to maximize
-                print(f"--- Waiting {WAIT_TIME} seconds for application to load ---")
-                time.sleep(WAIT_TIME)
+                # WAIT_TIME = 6  # Give more time for window to maximize
+                # print(f"--- Waiting {WAIT_TIME} seconds for application to load ---")
+                # time.sleep(WAIT_TIME)
                 print("--- Detecting new application window... ---" )
                 target_window = detect_new_window(existing_titles)
                 if target_window is None:

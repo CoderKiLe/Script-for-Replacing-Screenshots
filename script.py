@@ -193,6 +193,17 @@ def find_cs_projects(main_directory):
     
     return cs_projects
 
+def search_resx_file(project_dir):
+    """Search for a .resx file in the project directory"""
+    print("--- Searching for .resx files ---")
+    for root, dirs, files in os.walk(project_dir):
+        for file in files:
+            if file.endswith('.resx'):
+                print(f"Found .resx file: {file} in {root}" )
+                return os.path.join(root, file)
+    return None
+
+
 def run_for_all_projects():
     """Main function to process all projects"""
     # Get the main directory from user input
@@ -223,7 +234,9 @@ def run_for_all_projects():
         print(f"\n{'='*60}")
         print(f"Processing project {i}/{len(projects)}: {os.path.basename(project_dir)}")
         print(f"{'='*60}")
-        
+
+        search_resx_file(project_dir=project_dir)
+
         if process_single_project(project_dir):
             successful += 1
         else:
