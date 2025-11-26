@@ -9,19 +9,19 @@ from pathlib import Path
 import signal
 from resx_ico_replace import ResxIconUpdater
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from pathlib import Path
 
 # Create the logger
 logger = logging.getLogger("MsBuildScript Log")
 logger.setLevel(logging.DEBUG)
 
 # Handler for DEBUG logs
-errorLoggingHandler = logging.FileHandler(f"error_{datetime.now().strftime("%d_%m_%y_%H_%M_%S")}.log", encoding="utf-8")
+errorLoggingHandler = logging.FileHandler(f"error", encoding="utf-8")
 errorLoggingHandler.setLevel(logging.ERROR)
 errorLoggingHandler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 
 # Handler for INFO logs
-infoLoggingHandler = logging.FileHandler(f"debug_{datetime.now().strftime("%d_%m_%y_%H_%M_%S")}.log", encoding="utf-8")
+infoLoggingHandler = logging.FileHandler(f"debug.log", encoding="utf-8")
 infoLoggingHandler.setLevel(logging.DEBUG)
 infoLoggingHandler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 
@@ -111,20 +111,20 @@ def run_subprocess(command, cwd, wait = True, debug_name = "Subprocess"):
 
 def build_and_run_netframework_project(project_dir, csproj):
     """Build and run .NET Framework project"""    
-    print(f"Building project: {csproj}")
+    print(f"Building project: \"{csproj}\"")
 
     # Step 1: Clean the project
-    run_subprocess(f'dotnet clean {csproj}', cwd=project_dir, debug_name="Clean")
+    run_subprocess(f'dotnet clean "{csproj}"', cwd=project_dir, debug_name="Clean")
 
     # Step 2: Restore packages
-    run_subprocess(f'dotnet restore {csproj}', cwd=project_dir, debug_name="Restore")
+    run_subprocess(f'dotnet restore "{csproj}"', cwd=project_dir, debug_name="Restore")
 
     # Step 3: Build the project
-    print(f"Building project: {csproj}")
-    run_subprocess(f'msbuild {csproj}', cwd=project_dir, debug_name="Build")
+    print(f'Building project: "{csproj}"')
+    run_subprocess(f'msbuild "{csproj}"', cwd=project_dir, debug_name="Build")
 
     # Step 4: Dotnet run
-    return run_subprocess(f'dotnet run {csproj}', cwd=project_dir, wait=False, debug_name="Run")
+    return run_subprocess(f'dotnet run "{csproj}"', cwd=project_dir, wait=False, debug_name="Run")
 
 
 def find_output_executable(project_dir, csproj_filename):
@@ -155,7 +155,7 @@ def find_output_executable(project_dir, csproj_filename):
     
     return None
 
-def detect_new_window(existing_titles, retry_count = 0, max_retries = 20):
+def detect_new_window(existing_titles, retry_count = 0, max_retries = 1000):
     if retry_count >= max_retries:
         print("Error: Maximum retries reached while detecting new window.")
         raise Exception("Maximum retries reached while detecting new window.")
@@ -224,8 +224,7 @@ def bring_window_to_front_take_screenshot(target_window, csproj):
             target_window.height
         ))
         # Step 5: Save with project name for uniqueness
-        project_name = os.path.basename(csproj)
-        save_path = os.path.join(csproj, f"{project_name}_screenshot.png")
+        save_path = os.path.join(csproj, "screenshot.png")
         screenshot.save(save_path)
         logger.debug(f"Screenshot saved to: {save_path}")
 
@@ -340,27 +339,10 @@ def cleanup_stray_processes(project_dir):
         print(f"Error during stray process cleanup: {e}")
 
 def find_cs_projects(main_directory):
-    """Find all CS project directories within the main directory structure"""
-    cs_projects = []
-    
+    """Find all CS project directories within the main directory structure"""    
     print(f"Scanning main directory: {main_directory}")
+    return [str(path.parent) for path in Path(main_directory).rglob("*.csproj")]
     
-    # Walk through all directories under the main directory
-    for root, dirs, files in os.walk(main_directory):
-        # Check if this is a "CS" directory
-        if os.path.basename(root).upper() == "CS":
-            print(f"Found CS directory: {root}")
-            # Look for project directories within the CS folder
-            for item in os.listdir(root):
-                item_path = os.path.join(root, item)
-                if os.path.isdir(item_path):
-                    # Check if it contains .csproj files
-                    if any(f.endswith('.csproj') for f in os.listdir(item_path)):
-                        cs_projects.append(item_path)
-                        print(f"  Found C# project: {item_path}")
-    
-    return cs_projects
-
 def run_for_all_projects():
     """Main function to process all projects"""
     # Get the main directory from user input
