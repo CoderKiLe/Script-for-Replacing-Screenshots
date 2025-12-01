@@ -155,7 +155,7 @@ def find_output_executable(project_dir, csproj_filename):
     
     return None
 
-def detect_new_window(existing_titles, retry_count = 0, max_retries = 1000):
+def detect_new_window(existing_titles, retry_count = 0, max_retries = 250):
     if retry_count >= max_retries:
         print("Error: Maximum retries reached while detecting new window.")
         raise Exception("Maximum retries reached while detecting new window.")
