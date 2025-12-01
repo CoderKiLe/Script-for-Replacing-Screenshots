@@ -10,25 +10,153 @@ import signal
 from resx_ico_replace import ResxIconUpdater
 import xml.etree.ElementTree as ET
 from pathlib import Path
+import re
 
 # Create the logger
 logger = logging.getLogger("MsBuildScript Log")
 logger.setLevel(logging.DEBUG)
 
-# Handler for DEBUG logs
-errorLoggingHandler = logging.FileHandler(f"error", encoding="utf-8")
+
+# Handler for error logs
+errorLoggingHandler = logging.FileHandler(f"error.log", encoding="utf-8")
 errorLoggingHandler.setLevel(logging.ERROR)
 errorLoggingHandler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 
-# Handler for INFO logs
-infoLoggingHandler = logging.FileHandler(f"debug.log", encoding="utf-8")
-infoLoggingHandler.setLevel(logging.DEBUG)
+# Handler for debug logs
+debugLoggingHandler = logging.FileHandler(f"debug.log", encoding="utf-8")
+debugLoggingHandler.setLevel(logging.DEBUG)
+debugLoggingHandler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+
+# Handler for info logs
+infoLoggingHandler = logging.FileHandler(f"info.log", encoding="utf-8")
+infoLoggingHandler.setLevel(logging.INFO)
 infoLoggingHandler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 
 # Attach handlers to the logger
 logger.addHandler(errorLoggingHandler)
+logger.addHandler(debugLoggingHandler)
 logger.addHandler(infoLoggingHandler)
 
+
+# read program.cs and determine which form is the entry point
+def get_entry_form_name(project_dir):
+    """
+    Reads Program.cs to identify the main form class instantiated in Application.Run().
+    Returns the class name string or None if not found.
+    """
+    program_cs_path = os.path.join(project_dir, "Program.cs")
+    if not os.path.exists(program_cs_path):
+        print(f"Program.cs not found in {project_dir}")
+        logger.error(f"Program.cs not found in {project_dir}")
+        return None
+
+    try:
+        with open(program_cs_path, "r", encoding="utf-8-sig", errors="ignore") as f:
+            content = f.read()
+            # Regex looks for: Application.Run(new FormName
+            match = re.search(r"Application\.Run\s*\(\s*new\s+([a-zA-Z0-9_]+)", content)
+            if match:
+                return match.group(1)
+    except Exception as e:
+        logger.error(f"Error parsing Program.cs in {project_dir}: {e}")
+        print(f"Error parsing Program.cs in {project_dir}: {e}")
+    
+    print(f"Could not find entry form name in {program_cs_path}")
+    logger.error(f"Could not find entry form name in {program_cs_path}")
+    return None
+
+
+# read {FormName}.Designer.cs and update the file after private void InitializeComponent()
+# {
+#   System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof({FormName})); # if this does not exist add it
+#   this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon"))); # if this does not exist add it
+def update_designer_file(project_dir, form_name):
+    """
+    Reads the FormName.Designer.cs file and updates it to include icon setting.
+    It adds 'System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof({FormName}));'
+    and 'this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));'
+    inside the InitializeComponent method if they don't already exist.
+    """
+    designer_file_path = os.path.join(project_dir, f"{form_name}.Designer.cs")
+
+    if not os.path.exists(designer_file_path):
+        logger.warning(f"Designer file not found for {form_name}: {designer_file_path}")
+        return False
+
+    try:
+        with open(designer_file_path, "r", encoding="utf-8-sig", errors="ignore") as f:
+            content = f.read()
+
+        # Find the InitializeComponent method
+        init_component_pattern = r"(private void InitializeComponent\s*\(\)\s*\{)([\s\S]*?)(\s*\})"
+        match = re.search(init_component_pattern, content)
+
+        if not match:
+            logger.warning(f"InitializeComponent method not found in {designer_file_path}")
+            return False
+
+        before_method = content[:match.start()]
+        method_body_start = match.group(1)
+        method_body_content = match.group(2)
+        method_body_end = match.group(3)
+        after_method = content[match.end():]
+
+        modified = False
+        lines_to_add = []
+
+        # Check for ComponentResourceManager line
+        resource_manager_line = f"System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof({form_name}));"
+        if resource_manager_line not in method_body_content:
+            lines_to_add.append(f"            {resource_manager_line}\n")
+            modified = True
+            logger.debug(f"Added ComponentResourceManager line to {designer_file_path}")
+
+        # Check for Icon setting line
+        icon_line = "this.Icon = ((System.Drawing.Icon)(resources.GetObject(\"$this.Icon\")));"
+        if icon_line not in method_body_content:
+            lines_to_add.append(f"            {icon_line}\n")
+            modified = True
+            logger.debug(f"Added Icon setting line to {designer_file_path}")
+
+        if modified:
+            # Insert lines just before the closing brace of InitializeComponent
+            # We need to find the actual closing brace position within the method_body_content
+            # assuming the last 'this.Controls.Add' or similar is a good place
+            # or simply before the last non-whitespace line.
+            # A safer approach is to find the last occurrence of 'this.' or 'base.'
+            # or just insert at the beginning of the method body.
+            # For simplicity, we'll append to the existing content before the closing '}'
+
+            # Ensure there's a newline before adding if the body isn't empty
+            if lines_to_add and method_body_content.strip():
+                insert_point = method_body_content.rfind('\n')
+                if insert_point != -1:
+                    method_body_content = method_body_content[:insert_point+1] + "\n".join(lines_to_add) + method_body_content[insert_point+1:]
+                else: # single line body
+                    method_body_content += '\n' + "\n".join(lines_to_add)
+            elif lines_to_add: # empty body
+                method_body_content = '\n' + "\n".join(lines_to_add) + '\n'
+
+
+            new_content = (
+                before_method +
+                method_body_start +
+                method_body_content +
+                method_body_end +
+                after_method
+            )
+
+            with open(designer_file_path, "w", encoding="utf-8-sig") as f:
+                f.write(new_content)
+            logger.debug(f"Successfully updated {designer_file_path} with icon settings.")
+            return True
+        else:
+            logger.debug(f"Icon settings already present in {designer_file_path}. No changes made.")
+            return False
+
+    except Exception as e:
+        logger.error(f"Error updating designer file {designer_file_path}: {e}")
+        return False
 
 def kill_process_tree(pid):
     """Kill a process and all its child processes"""
@@ -288,7 +416,17 @@ def process_single_project(project_dir):
     for csproj in csproj_files:
         app_process = None
         try:
-            ResxIconUpdater('C1.ico').search_and_update(project_dir)
+            main_form_name = get_entry_form_name(project_dir)
+            if main_form_name is None:
+                logger.error(f"Could not find entry form name for {csproj}, skipping...")
+                failedCount += 1
+                raise Exception(f"Could not find entry form name for {csproj}")
+            logger.debug(f"[{csproj}]-Updating resx file for {main_form_name}...")
+            print(f'    [{csproj}]-Updating resx file for {main_form_name}...')
+            ResxIconUpdater('C1.ico').search_and_update(project_dir, [f"{main_form_name}.resx"])
+            logger.debug(f"[{csproj}]-Updating designer file for {main_form_name}...")
+            print(f'    [{csproj}]-Updating designer file for {main_form_name}...')
+            update_designer_file(project_dir, main_form_name)
             app_process = build_and_run_netframework_project(project_dir, csproj)
 
             print("--- Detecting new application window... ---" )
@@ -305,6 +443,7 @@ def process_single_project(project_dir):
             print("--- Closing application... ---")
             close_application(target_window)
             successCount += 1
+            logger.info(f"[{csproj}][{project_dir}]-Build/Run successful for {csproj}")
         except Exception as e:
             logger.error(f"[{csproj}][{project_dir}]-Build/Run failed for {csproj}: {e}")   
             print(f"Build/Run failed for {csproj}: {e}")
@@ -416,8 +555,7 @@ if __name__ == "__main__":
         # Original single project functionality
         PROJECT_DIR = input("Enter the full path to your project directory: ").strip().strip('"').strip("'")
 
-        PROJECT_DIR = Path(r"K:\Source Clone Items\Winforms Code base (Samples)-Source Clone\NetFramework\Barcode\CS\BarcodeDemo")
+        # PROJECT_DIR = Path(r"K:\Source Clone Items\Winforms Code base (Samples)-Source Clone\NetFramework\Barcode\CS\BarcodeDemo")
         # PROJECT_DIR = "K:\Source Clone Items\Winforms Code base (Samples)-Source Clone\NetFramework\Barcode\CS\BarcodeDemo".strip().strip('"').strip("'")
         logger.debug(f"Processing single project: {PROJECT_DIR}")
-        logger.error("This is just for testing purposes")
         process_single_project(PROJECT_DIR)

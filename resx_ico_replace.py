@@ -27,6 +27,7 @@ class ResxIconUpdater:
         with open(file_path, 'r', encoding='utf-8') as f:
             tree = ET.parse(f)
         root = tree.getroot()
+        chunk_size = 80
 
         found = False
         # Replace Icon
@@ -34,7 +35,6 @@ class ResxIconUpdater:
             if item.attrib.get('name') == '$this.Icon':
                 found = True
                 # Chunk the base64 string into lines of 80 characters for better readability
-                chunk_size = 80
                 chunked_str = '\n        '.join(self.encoded_icon[i:i+chunk_size] for i in range(0, len(self.encoded_icon), chunk_size))
                 item.find('value').text = '\n        ' + chunked_str + '\n    '
 
@@ -44,23 +44,31 @@ class ResxIconUpdater:
             with open(file_path, 'wb') as f:
                 f.write(ET.tostring(root, encoding='utf-8', xml_declaration=True))
         else:
-            raise Exception(f"  $this.Icon not found in {file_path}")
+            print(f"  $this.Icon not found in {file_path}, adding...")
+            # Add a new data element
+            new_data = ET.SubElement(root, 'data', name='$this.Icon')
+            new_data.set('type', 'System.Drawing.Icon, System.Drawing')
+            new_data.set('mimetype', 'application/x-microsoft.net.object.bytearray.base64')
+            new_value = ET.SubElement(new_data, 'value')
+            chunked_str = '\n        '.join(self.encoded_icon[i:i+chunk_size] for i in range(0, len(self.encoded_icon), chunk_size))
+            new_value.text = '\n        ' + chunked_str + '\n    '
+            root.append(new_data)
+            with open(file_path, 'wb') as f:
+                f.write(ET.tostring(root, encoding='utf-8', xml_declaration=True))
 
 
-    def search_and_update(self, project_dir):
-        target_filenames = {'mainform.resx', 'form1.resx'}
-
+    def search_and_update(self, project_dir, target_filenames = {'mainform.resx', 'form1.resx'}):
         print(f"Searching in: {os.path.abspath(project_dir)}")
 
         found_any = False
         for root, dirs, files in os.walk(project_dir):
             for file in files:
-                if file.lower() in target_filenames:
+                if file in target_filenames:
                     found_any = True
                     full_path = os.path.join(root, file)
                     self.update_resx_file(full_path)
 
         if not found_any:
-             raise Exception("MainForm.resx or Form1.resx not found in the project directory")
+             raise Exception("{} not found in the project directory".format(target_filenames))
 
  
