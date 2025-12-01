@@ -70,6 +70,7 @@ def get_entry_form_name(project_dir):
 # {
 #   System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof({FormName})); # if this does not exist add it
 #   this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon"))); # if this does not exist add it
+# insert the lines right after starting braces "{"
 def update_designer_file(project_dir, form_name):
     """
     Reads the FormName.Designer.cs file and updates it to include icon setting.
@@ -107,45 +108,19 @@ def update_designer_file(project_dir, form_name):
         # Check for ComponentResourceManager line
         resource_manager_line = f"System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof({form_name}));"
         if resource_manager_line not in method_body_content:
-            lines_to_add.append(f"            {resource_manager_line}\n")
+            lines_to_add.append(f"\n            {resource_manager_line}")
             modified = True
             logger.debug(f"Added ComponentResourceManager line to {designer_file_path}")
 
         # Check for Icon setting line
         icon_line = "this.Icon = ((System.Drawing.Icon)(resources.GetObject(\"$this.Icon\")));"
         if icon_line not in method_body_content:
-            lines_to_add.append(f"            {icon_line}\n")
+            lines_to_add.append(f"            {icon_line}")
             modified = True
             logger.debug(f"Added Icon setting line to {designer_file_path}")
 
         if modified:
-            # Insert lines just before the closing brace of InitializeComponent
-            # We need to find the actual closing brace position within the method_body_content
-            # assuming the last 'this.Controls.Add' or similar is a good place
-            # or simply before the last non-whitespace line.
-            # A safer approach is to find the last occurrence of 'this.' or 'base.'
-            # or just insert at the beginning of the method body.
-            # For simplicity, we'll append to the existing content before the closing '}'
-
-            # Ensure there's a newline before adding if the body isn't empty
-            if lines_to_add and method_body_content.strip():
-                insert_point = method_body_content.rfind('\n')
-                if insert_point != -1:
-                    method_body_content = method_body_content[:insert_point+1] + "\n".join(lines_to_add) + method_body_content[insert_point+1:]
-                else: # single line body
-                    method_body_content += '\n' + "\n".join(lines_to_add)
-            elif lines_to_add: # empty body
-                method_body_content = '\n' + "\n".join(lines_to_add) + '\n'
-
-
-            new_content = (
-                before_method +
-                method_body_start +
-                method_body_content +
-                method_body_end +
-                after_method
-            )
-
+            new_content = before_method + method_body_start + "\n".join(lines_to_add) + method_body_content + method_body_end + after_method
             with open(designer_file_path, "w", encoding="utf-8-sig") as f:
                 f.write(new_content)
             logger.debug(f"Successfully updated {designer_file_path} with icon settings.")
