@@ -11,12 +11,25 @@ from resx_ico_replace import ResxIconUpdater
 import xml.etree.ElementTree as ET
 from pathlib import Path
 import re
+import cv2
+import numpy as np
+from PIL import Image
 
-# Create the logger
-logger = logging.getLogger("MsBuildScript Log")
+def show_image(image_path):
+    # Open images using PIL
+    try:
+        img_pil = Image.open(image_path)
+    except FileNotFoundError as e:
+        print(f"Error opening image files: {e}")
+    img_cv = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+    cv2.imshow(image_path, img_cv)
+
+def wait_for_cv2():
+    cv2.waitKey(0) 
+    cv2.destroyAllWindows()
+
+logger = logging.getLogger("msBuildScript")
 logger.setLevel(logging.DEBUG)
-
-
 # Handler for error logs
 errorLoggingHandler = logging.FileHandler(f"error.log", encoding="utf-8")
 errorLoggingHandler.setLevel(logging.ERROR)
@@ -363,7 +376,7 @@ def bring_window_to_front_take_screenshot(target_window, csproj):
         save_path = os.path.join(csproj, "screenshot.png")
         screenshot.save(save_path)
         logger.debug(f"Screenshot saved to: {save_path}")
-
+        show_image(save_path)
     except Exception as e:
         logger.error(f"Failed to capture screenshot: {e}")    
         print(f"Failed to capture screenshot: {e}")
@@ -541,7 +554,6 @@ def run_for_all_projects():
         
         # Longer delay between projects to ensure clean shutdown
         time.sleep(5)
-    
     print(f"\n{'='*60}")
     print(f"Batch processing completed!")
     print(f"Successful: {successful}")
@@ -549,6 +561,9 @@ def run_for_all_projects():
     print(f"Total: {len(projects)}")
     print(f"{'='*60}")
     logger.debug(f"Batch processing completed! Successful: {successful}, Failed: {failed}, Total: {len(projects)}")
+    print(f"Batch processing completed! Successful: {successful}, Failed: {failed}, Total: {len(projects)}")
+    print("Waiting for all the processes to exit...")
+    wait_for_cv2()
 
 
 def exit_gracefully(signum, frame):
@@ -572,3 +587,4 @@ if __name__ == "__main__":
         # PROJECT_DIR = "K:\Source Clone Items\Winforms Code base (Samples)-Source Clone\NetFramework\Barcode\CS\BarcodeDemo".strip().strip('"').strip("'")
         logger.debug(f"Processing single project: {PROJECT_DIR}")
         process_single_project(PROJECT_DIR)
+        wait_for_cv2()
