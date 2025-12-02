@@ -37,21 +37,38 @@ logger.addHandler(errorLoggingHandler)
 logger.addHandler(debugLoggingHandler)
 logger.addHandler(infoLoggingHandler)
 
-
-# read program.cs and determine which form is the entry point
-def get_entry_form_name(project_dir):
+def get_entry_cs_file(project_dir):
     """
     Reads Program.cs to identify the main form class instantiated in Application.Run().
     Returns the class name string or None if not found.
     """
     program_cs_path = os.path.join(project_dir, "Program.cs")
     if not os.path.exists(program_cs_path):
-        print(f"Program.cs not found in {project_dir}")
-        logger.error(f"Program.cs not found in {project_dir}")
+        # Look for cs files with main method with Application.Run(new FormName)
+        # and return the form name
+        for file in os.listdir(project_dir):
+            if file.endswith(".cs"):
+                with open(os.path.join(project_dir, file), "r", encoding="utf-8-sig", errors="ignore") as f:
+                    content = f.read()
+                    match = re.search(r"Application\.Run\s*\(\s*new\s+([a-zA-Z0-9_]+)", content)
+                    if match:
+                        return file
         return None
 
+    return "Program.cs"
+
+# read program.cs and determine which form is the entry point
+def get_entry_form_name(project_dir, entry_file):
+    """
+    Reads entry path to identify the main form class instantiated in Application.Run().
+    Returns the class name string or None if not found.
+    """
+    if entry_file is None:
+        logger.error("Entry file not found")
+        raise Exception("Entry file not found")
+
     try:
-        with open(program_cs_path, "r", encoding="utf-8-sig", errors="ignore") as f:
+        with open(os.path.join(project_dir, entry_file), "r", encoding="utf-8-sig", errors="ignore") as f:
             content = f.read()
             # Regex looks for: Application.Run(new FormName
             match = re.search(r"Application\.Run\s*\(\s*new\s+([a-zA-Z0-9_]+)", content)
@@ -61,8 +78,8 @@ def get_entry_form_name(project_dir):
         logger.error(f"Error parsing Program.cs in {project_dir}: {e}")
         print(f"Error parsing Program.cs in {project_dir}: {e}")
     
-    print(f"Could not find entry form name in {program_cs_path}")
-    logger.error(f"Could not find entry form name in {program_cs_path}")
+    print(f"Could not find entry form name in {entry_file}")
+    logger.error(f"Could not find entry form name in {entry_file}")
     return None
 
 
@@ -397,7 +414,12 @@ def process_single_project(project_dir):
     for csproj in csproj_files:
         app_process = None
         try:
-            main_form_name = get_entry_form_name(project_dir)
+            is_sample_without_program_cs = False
+            entry_cs_file = get_entry_cs_file(project_dir)
+            if entry_cs_file == "Program.cs":
+                is_sample_without_program_cs = True
+                
+            main_form_name = get_entry_form_name(project_dir, entry_cs_file)
             if main_form_name is None:
                 logger.error(f"Could not find entry form name for {csproj}, skipping...")
                 failedCount += 1
@@ -407,7 +429,8 @@ def process_single_project(project_dir):
             ResxIconUpdater('C1.ico').search_and_update(project_dir, [f"{main_form_name}.resx"])
             logger.debug(f"[{csproj}]-Updating designer file for {main_form_name}...")
             print(f'    [{csproj}]-Updating designer file for {main_form_name}...')
-            update_designer_file(project_dir, main_form_name)
+            if is_sample_without_program_cs:
+                update_designer_file(project_dir, main_form_name)
             app_process = build_and_run_netframework_project(project_dir, csproj)
 
             print("--- Detecting new application window... ---" )
