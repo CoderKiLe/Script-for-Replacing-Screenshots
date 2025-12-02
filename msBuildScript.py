@@ -98,18 +98,23 @@ def update_designer_file(project_dir, form_name):
     designer_file_path = os.path.join(project_dir, f"{form_name}.Designer.cs")
 
     if not os.path.exists(designer_file_path):
-        logger.error(f"Designer file not found for {form_name}: {designer_file_path}")
-        raise Exception(f"Designer file not found for {form_name}: {designer_file_path}")
+        # check if {form_name}.cs exists and use that
+        if os.path.exists(os.path.join(project_dir, f"{form_name}.cs")):
+            designer_file_path = os.path.join(project_dir, f"{form_name}.cs")
+        else:
+            logger.error(f"Designer file not found for {form_name}: {designer_file_path}")
+            raise Exception(f"Designer file not found for {form_name}: {designer_file_path}")
 
     with open(designer_file_path, "r", encoding="utf-8-sig", errors="ignore") as f:
             content = f.read()
 
     # Find the InitializeComponent method
-    init_component_pattern = r"(private void InitializeComponent\s*\(\)\s*\{)([\s\S]*?)(\s*\})"
+    init_component_pattern = r"(private void InitializeComponent\s*\(\)\s*\{)([\s\S]*)(\s*\}\s*#endregion)"
     init_component_match = re.search(init_component_pattern, content)
 
     if not init_component_match:
         logger.warning(f"InitializeComponent method not found in {designer_file_path}")
+        raise Exception(f"InitializeComponent method not found in {designer_file_path}")
         return False
 
     before_method = content[:init_component_match.start()]
@@ -127,7 +132,8 @@ def update_designer_file(project_dir, form_name):
     # Check for ComponentResourceManager line
     resource_manager_line_pattern = r"(System.ComponentModel.ComponentResourceManager\s?resources\s?=\s?new\s?(System.ComponentModel.ComponentResourceManager)?\(typeof\(.*\)\);)"
     resource_manager_match = re.search(resource_manager_line_pattern, method_body_content)
-    resource_manager_line = "System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof({FormName}));"
+    resource_manager_line = f"System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof({form_name}));"
+
     if resource_manager_match is None:
         lines_to_add.append(f"\n            {resource_manager_line}")
         modified = True
@@ -147,6 +153,10 @@ def update_designer_file(project_dir, form_name):
     else:
         method_body_before_content = method_body_content[:icon_line_match.end()]
         method_body_after_content = method_body_content[icon_line_match.end():]
+
+    if len(method_body_before_content) == 0 and len(method_body_after_content) == 0:
+        method_body_before_content = method_body_content
+        method_body_after_content = ""
 
     if modified:
         new_content = before_method + method_body_start + method_body_before_content + "\n".join(lines_to_add) + method_body_after_content + method_body_end + after_method
@@ -414,23 +424,22 @@ def process_single_project(project_dir):
     for csproj in csproj_files:
         app_process = None
         try:
-            is_sample_without_program_cs = False
+            is_entry_point_program_cs = False
             entry_cs_file = get_entry_cs_file(project_dir)
             if entry_cs_file == "Program.cs":
-                is_sample_without_program_cs = True
+                is_entry_point_program_cs = True
                 
             main_form_name = get_entry_form_name(project_dir, entry_cs_file)
             if main_form_name is None:
                 logger.error(f"Could not find entry form name for {csproj}, skipping...")
                 failedCount += 1
                 raise Exception(f"Could not find entry form name for {csproj}")
+
             logger.debug(f"[{csproj}]-Updating resx file for {main_form_name}...")
             print(f'    [{csproj}]-Updating resx file for {main_form_name}...')
             ResxIconUpdater('C1.ico').search_and_update(project_dir, [f"{main_form_name}.resx"])
-            logger.debug(f"[{csproj}]-Updating designer file for {main_form_name}...")
-            print(f'    [{csproj}]-Updating designer file for {main_form_name}...')
-            if is_sample_without_program_cs:
-                update_designer_file(project_dir, main_form_name)
+
+            update_designer_file(project_dir, main_form_name)
             app_process = build_and_run_netframework_project(project_dir, csproj)
 
             print("--- Detecting new application window... ---" )
