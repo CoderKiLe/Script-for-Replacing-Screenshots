@@ -63,7 +63,7 @@ class ResxIconUpdater:
         found_any = False
         for root, dirs, files in os.walk(project_dir):
             for file in files:
-                if file in target_filenames:
+                if file in [os.path.basename(filename) for filename in target_filenames]:
                     found_any = True
                     full_path = os.path.join(root, file)
                     self.update_resx_file(full_path)
