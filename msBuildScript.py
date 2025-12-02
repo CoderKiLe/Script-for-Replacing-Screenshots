@@ -11,22 +11,22 @@ from resx_ico_replace import ResxIconUpdater
 import xml.etree.ElementTree as ET
 from pathlib import Path
 import re
-import cv2
-import numpy as np
-from PIL import Image
+# import cv2
+# import numpy as np
+# from PIL import Image
 
-def show_image(image_path):
-    # Open images using PIL
-    try:
-        img_pil = Image.open(image_path)
-    except FileNotFoundError as e:
-        print(f"Error opening image files: {e}")
-    img_cv = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
-    cv2.imshow(image_path, img_cv)
+# def show_image(image_path):
+#     # Open images using PIL
+#     try:
+#         img_pil = Image.open(image_path)
+#     except FileNotFoundError as e:
+#         print(f"Error opening image files: {e}")
+#     img_cv = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+#     cv2.imshow(image_path, img_cv)
 
-def wait_for_cv2():
-    cv2.waitKey(0) 
-    cv2.destroyAllWindows()
+# def wait_for_cv2():
+#     cv2.waitKey(0) 
+#     cv2.destroyAllWindows()
 
 logger = logging.getLogger("msBuildScript")
 logger.setLevel(logging.DEBUG)
@@ -148,15 +148,21 @@ def update_designer_file(project_dir, form_name):
     resource_manager_line = f"System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof({form_name}));"
 
     if resource_manager_match is None:
-        lines_to_add.append(f"\n            {resource_manager_line}")
-        modified = True
-        logger.debug(f"Added ComponentResourceManager line to {designer_file_path}")
+        resource_manager_line_pattern = r"(System.Resources.ResourceManager\s?resources\s?=\s?new\s?(System.Resources.ResourceManager)?\(typeof\(.*\)\);)"
+        resource_manager_match = re.search(resource_manager_line_pattern, method_body_content)
+        if resource_manager_match is None:
+            lines_to_add.append(f"\n            {resource_manager_line}")
+            modified = True
+            logger.debug(f"Added ComponentResourceManager line to {designer_file_path}")
+        else:
+            method_body_before_content = method_body_content[:resource_manager_match.end()]
+            method_body_after_content = method_body_content[resource_manager_match.end():]
     else:
         method_body_before_content = method_body_content[:resource_manager_match.end()]
-        method_body_after_content = method_body_content[resource_manager_match.end():]
+        method_body_after_content = method_body_content[resource_manager_match.end():] 
 
     # Check for Icon setting line
-    icon_line_pattern = r"((this.)?Icon = \?\(?\(System.Drawing.Icon\)\(?resources.GetObject\(\"\$this.Icon\"\)\)\)?;)"
+    icon_line_pattern = r"((this.)?Icon\s?=\s?\(?\(?System.Drawing.Icon\)?\(?resources.GetObject\(\"\$this.Icon\"\)\)?\)?;)"
     icon_line = "Icon = (System.Drawing.Icon)resources.GetObject(\"$this.Icon\");"
     icon_line_match = re.search(icon_line_pattern, method_body_content)
     if icon_line_match is None:
@@ -367,16 +373,16 @@ def bring_window_to_front_take_screenshot(target_window, csproj):
     print("--- Capturing Screenshot ---")
     try:
         screenshot = pyautogui.screenshot(region=(
-            target_window.left, 
-            target_window.top, 
-            target_window.width, 
-            target_window.height
+            target_window.left + 14, 
+            target_window.top + 14, 
+            target_window.width - 28, 
+            target_window.height - 28
         ))
         # Step 5: Save with project name for uniqueness
         save_path = os.path.join(csproj, "screenshot.png")
         screenshot.save(save_path)
         logger.debug(f"Screenshot saved to: {save_path}")
-        show_image(save_path)
+        # show_image(save_path)
     except Exception as e:
         logger.error(f"Failed to capture screenshot: {e}")    
         print(f"Failed to capture screenshot: {e}")
@@ -437,20 +443,23 @@ def process_single_project(project_dir):
     for csproj in csproj_files:
         app_process = None
         try:
-            is_entry_point_program_cs = False
             entry_cs_file = get_entry_cs_file(project_dir)
-            if entry_cs_file == "Program.cs":
-                is_entry_point_program_cs = True
-                
             main_form_name = get_entry_form_name(project_dir, entry_cs_file)
             if main_form_name is None:
                 logger.error(f"Could not find entry form name for {csproj}, skipping...")
                 failedCount += 1
                 raise Exception(f"Could not find entry form name for {csproj}")
-
+            
             logger.debug(f"[{csproj}]-Updating resx file for {main_form_name}...")
             print(f'    [{csproj}]-Updating resx file for {main_form_name}...')
-            ResxIconUpdater('C1.ico').search_and_update(project_dir, [f"{main_form_name}.resx"])
+            try:
+                ResxIconUpdater('C1.ico').search_and_update(project_dir, [f"{main_form_name}.resx"])
+            except Exception as e:
+                if str(e).endswith("not found in the project directory"):
+                    resx_file = f"{entry_cs_file}".replace(".cs", ".resx")
+                    ResxIconUpdater('C1.ico').search_and_update(project_dir, [resx_file])
+                else:
+                    raise e
 
             update_designer_file(project_dir, main_form_name)
             app_process = build_and_run_netframework_project(project_dir, csproj)
@@ -563,7 +572,7 @@ def run_for_all_projects():
     logger.debug(f"Batch processing completed! Successful: {successful}, Failed: {failed}, Total: {len(projects)}")
     print(f"Batch processing completed! Successful: {successful}, Failed: {failed}, Total: {len(projects)}")
     print("Waiting for all the processes to exit...")
-    wait_for_cv2()
+    # wait_for_cv2()
 
 
 def exit_gracefully(signum, frame):
