@@ -50,6 +50,23 @@ logger.addHandler(errorLoggingHandler)
 logger.addHandler(debugLoggingHandler)
 logger.addHandler(infoLoggingHandler)
 
+def get_main_class_files(project_dir, form_name):
+    # given the form(eg: Form1) name and project dir
+    # return the list of files that contain the form name
+    main_class_files = []
+    for root, _, files in os.walk(project_dir):
+        for file in files:
+            if file.endswith(".cs"):
+                file_path = os.path.join(root, file)
+                try:
+                    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read()
+                        if re.search(r"class\s+" + re.escape(form_name), content):
+                            main_class_files.append(file_path)
+                except Exception as e:
+                    logger.error(f"Error reading file {file_path}: {e}")
+    return main_class_files
+
 def get_entry_cs_file(project_dir):
     """
     Reads Program.cs to identify the main form class instantiated in Application.Run().
@@ -101,14 +118,17 @@ def get_entry_form_name(project_dir, entry_file):
 #   System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof({FormName})); # if this does not exist add it
 #   this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon"))); # if this does not exist add it
 # insert the lines right after starting braces "{"
-def update_designer_file(project_dir, form_name):
+def update_designer_file(project_dir, form_name, file = ""):
     """
     Reads the FormName.Designer.cs file and updates it to include icon setting.
     It adds 'System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof({FormName}));'
     and 'this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));'
     inside the InitializeComponent method if they don't already exist.
     """
-    designer_file_path = os.path.join(project_dir, f"{form_name}.Designer.cs")
+    if file.isspace():
+        designer_file_path = os.path.join(project_dir, f"{form_name}.Designer.cs")
+    else:
+        designer_file_path = os.path.join(project_dir, file)
 
     if not os.path.exists(designer_file_path):
         # check if {form_name}.cs exists and use that
@@ -445,6 +465,8 @@ def process_single_project(project_dir):
         try:
             entry_cs_file = get_entry_cs_file(project_dir)
             main_form_name = get_entry_form_name(project_dir, entry_cs_file)
+            main_class_files = get_main_class_files(project_dir, main_form_name)
+
             if main_form_name is None:
                 logger.error(f"Could not find entry form name for {csproj}, skipping...")
                 failedCount += 1
@@ -455,13 +477,41 @@ def process_single_project(project_dir):
             try:
                 ResxIconUpdater('C1.ico').search_and_update(project_dir, [f"{main_form_name}.resx"])
             except Exception as e:
-                if str(e).endswith("not found in the project directory"):
-                    resx_file = f"{entry_cs_file}".replace(".cs", ".resx")
-                    ResxIconUpdater('C1.ico').search_and_update(project_dir, [resx_file])
-                else:
-                    raise e
+                worked = False
+                for file in main_class_files:
+                    try:
+                        # file (eg: Form1.cs). Convert to `Form1.resx`
+                        print(f"updating {file.replace('.cs', '.resx')}")
+                        ResxIconUpdater('C1.ico').search_and_update(project_dir, [file.replace('.cs', '.resx')])
+                        worked = True
+                        break
+                    except Exception as e1:
+                        logger.error(f"[fallback] Could not update resx file for {file}: {e1}")
+                        print(f"[fallback] Could not update resx file for {file}: {e1}")
+                        pass
+                if not worked:
+                    logger.error(f"Could not update resx file for in {",".join(main_class_files)} files: {e}")
+                    print(f"Could not update resx file for in {",".join(main_class_files)} files: {e}")
+                    raise Exception(f"Could not update resx file for in {",".join(main_class_files)} files: {e}")
 
-            update_designer_file(project_dir, main_form_name)
+            # Designer file not found
+            try:
+                update_designer_file(project_dir, main_form_name, file = main_class_files[0])
+            except Exception as e:
+                worked = False
+                for file in main_class_files:
+                    try:
+                        update_designer_file(project_dir, main_form_name, file = file)
+                        worked = True
+                        print(f"updated designer file for {file}")
+                        break
+                    except Exception as e1:
+                        logger.error(f"[fallback] Could not update designer file for {file}: {e1}")
+                        print(f"[fallback] Could not update designer file for {file}: {e1}")
+                        pass
+                if not worked:
+                    logger.error(f"Could not update designer file for in {",".join(main_class_files)} files. e: {e}")
+                    raise Exception(f"Could not update designer file for in {",".join(main_class_files)} files. e: {e}")
             app_process = build_and_run_netframework_project(project_dir, csproj)
 
             print("--- Detecting new application window... ---" )
@@ -596,4 +646,4 @@ if __name__ == "__main__":
         # PROJECT_DIR = "K:\Source Clone Items\Winforms Code base (Samples)-Source Clone\NetFramework\Barcode\CS\BarcodeDemo".strip().strip('"').strip("'")
         logger.debug(f"Processing single project: {PROJECT_DIR}")
         process_single_project(PROJECT_DIR)
-        wait_for_cv2()
+        # wait_for_cv2()
