@@ -81,57 +81,63 @@ def update_designer_file(project_dir, form_name):
     designer_file_path = os.path.join(project_dir, f"{form_name}.Designer.cs")
 
     if not os.path.exists(designer_file_path):
-        logger.warning(f"Designer file not found for {form_name}: {designer_file_path}")
-        return False
+        logger.error(f"Designer file not found for {form_name}: {designer_file_path}")
+        raise Exception(f"Designer file not found for {form_name}: {designer_file_path}")
 
-    try:
-        with open(designer_file_path, "r", encoding="utf-8-sig", errors="ignore") as f:
+    with open(designer_file_path, "r", encoding="utf-8-sig", errors="ignore") as f:
             content = f.read()
 
-        # Find the InitializeComponent method
-        init_component_pattern = r"(private void InitializeComponent\s*\(\)\s*\{)([\s\S]*?)(\s*\})"
-        match = re.search(init_component_pattern, content)
+    # Find the InitializeComponent method
+    init_component_pattern = r"(private void InitializeComponent\s*\(\)\s*\{)([\s\S]*?)(\s*\})"
+    init_component_match = re.search(init_component_pattern, content)
 
-        if not match:
-            logger.warning(f"InitializeComponent method not found in {designer_file_path}")
-            return False
-
-        before_method = content[:match.start()]
-        method_body_start = match.group(1)
-        method_body_content = match.group(2)
-        method_body_end = match.group(3)
-        after_method = content[match.end():]
-
-        modified = False
-        lines_to_add = []
-
-        # Check for ComponentResourceManager line
-        resource_manager_line = f"System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof({form_name}));"
-        if resource_manager_line not in method_body_content:
-            lines_to_add.append(f"\n            {resource_manager_line}")
-            modified = True
-            logger.debug(f"Added ComponentResourceManager line to {designer_file_path}")
-
-        # Check for Icon setting line
-        icon_line = "this.Icon = ((System.Drawing.Icon)(resources.GetObject(\"$this.Icon\")));"
-        if icon_line not in method_body_content:
-            lines_to_add.append(f"            {icon_line}")
-            modified = True
-            logger.debug(f"Added Icon setting line to {designer_file_path}")
-
-        if modified:
-            new_content = before_method + method_body_start + "\n".join(lines_to_add) + method_body_content + method_body_end + after_method
-            with open(designer_file_path, "w", encoding="utf-8-sig") as f:
-                f.write(new_content)
-            logger.debug(f"Successfully updated {designer_file_path} with icon settings.")
-            return True
-        else:
-            logger.debug(f"Icon settings already present in {designer_file_path}. No changes made.")
-            return False
-
-    except Exception as e:
-        logger.error(f"Error updating designer file {designer_file_path}: {e}")
+    if not init_component_match:
+        logger.warning(f"InitializeComponent method not found in {designer_file_path}")
         return False
+
+    before_method = content[:init_component_match.start()]
+    method_body_start = init_component_match.group(1)
+    method_body_content = init_component_match.group(2)
+    method_body_end = init_component_match.group(3)
+    after_method = content[init_component_match.end():]
+
+    modified = False
+    lines_to_add = []
+
+    method_body_before_content = ""
+    method_body_after_content = ""
+
+    # Check for ComponentResourceManager line
+    resource_manager_line_pattern = r"(System.ComponentModel.ComponentResourceManager\s?resources\s?=\s?new\s?(System.ComponentModel.ComponentResourceManager)?\(typeof\(.*\)\);)"
+    resource_manager_match = re.search(resource_manager_line_pattern, method_body_content)
+    resource_manager_line = "System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof({FormName}));"
+    if resource_manager_match is None:
+        lines_to_add.append(f"\n            {resource_manager_line}")
+        modified = True
+        logger.debug(f"Added ComponentResourceManager line to {designer_file_path}")
+    else:
+        method_body_before_content = method_body_content[:resource_manager_match.end()]
+        method_body_after_content = method_body_content[resource_manager_match.end():]
+
+    # Check for Icon setting line
+    icon_line_pattern = r"((this.)?Icon = \?\(?\(System.Drawing.Icon\)\(?resources.GetObject\(\"\$this.Icon\"\)\)\)?;)"
+    icon_line = "Icon = (System.Drawing.Icon)resources.GetObject(\"$this.Icon\");"
+    icon_line_match = re.search(icon_line_pattern, method_body_content)
+    if icon_line_match is None:
+        lines_to_add.append(f"\n            {icon_line}")
+        modified = True
+        logger.debug(f"Added Icon setting line to {designer_file_path}")
+    else:
+        method_body_before_content = method_body_content[:icon_line_match.end()]
+        method_body_after_content = method_body_content[icon_line_match.end():]
+
+    if modified:
+        new_content = before_method + method_body_start + method_body_before_content + "\n".join(lines_to_add) + method_body_after_content + method_body_end + after_method
+        with open(designer_file_path, "w", encoding="utf-8-sig") as f:
+            f.write(new_content)
+        logger.debug(f"Successfully updated {designer_file_path} with icon settings.")
+    else:
+        logger.debug(f"Icon settings already present in {designer_file_path}. No changes made.")
 
 def kill_process_tree(pid):
     """Kill a process and all its child processes"""
