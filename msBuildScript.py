@@ -155,8 +155,8 @@ def update_designer_file(project_dir, form_name):
         method_body_after_content = method_body_content[icon_line_match.end():]
 
     if len(method_body_before_content) == 0 and len(method_body_after_content) == 0:
-        method_body_before_content = method_body_content
-        method_body_after_content = ""
+        method_body_before_content = ""
+        method_body_after_content = method_body_content
 
     if modified:
         new_content = before_method + method_body_start + method_body_before_content + "\n".join(lines_to_add) + method_body_after_content + method_body_end + after_method
