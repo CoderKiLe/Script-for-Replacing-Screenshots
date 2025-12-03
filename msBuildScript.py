@@ -373,7 +373,7 @@ def detect_new_window(existing_titles, retry_count = 0, max_retries = 250):
     time.sleep(0.2)
     return detect_new_window(existing_titles, retry_count, max_retries)
 
-def bring_window_to_front_take_screenshot(target_window, csproj, maximize = False):
+def bring_window_to_front_take_screenshot(target_window, csproj, maximize = True):
     if target_window is None:
         logger.debug("No target window to bring to front.")
         return
@@ -392,15 +392,17 @@ def bring_window_to_front_take_screenshot(target_window, csproj, maximize = Fals
     
     # Step 4: Take screenshot
     print("--- Capturing Screenshot ---")
-    screenshot_offset = 4
+    screenshot_offset_x = 4
+    screenshot_offset_y = 4
     if maximize:
-        screenshot_offset = 14
+        screenshot_offset_x = 14
+        screenshot_offset_y = 14
     try:
         screenshot = pyautogui.screenshot(region=(
-            target_window.left + screenshot_offset, 
-            target_window.top + screenshot_offset, 
-            target_window.width - screenshot_offset*2, 
-            target_window.height - screenshot_offset * 2
+            target_window.left + screenshot_offset_x, 
+            target_window.top + screenshot_offset_y, 
+            target_window.width - screenshot_offset_x*2, 
+            target_window.height - screenshot_offset_y * 2
         ))
         # Step 5: Save with project name for uniqueness
         save_path = os.path.join(csproj, "screenshot.png")
